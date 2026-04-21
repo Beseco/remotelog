@@ -14,6 +14,7 @@ import { ZammadTicketsCard } from "@/components/customers/zammad-tickets-card";
 import { InvoiceNinjaInvoicesCard } from "@/components/customers/invoiceninja-invoices-card";
 import { SessionTransferButton } from "@/components/customers/session-transfer-button";
 import { ProjectManager } from "@/components/customers/project-manager";
+import { CustomerInstallerButton } from "@/components/customers/installer-button";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -141,7 +142,8 @@ export default async function CustomerDetailPage({ params }: Params) {
               <p className="text-muted-foreground text-sm mt-1">{customer.notes}</p>
             )}
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 items-center">
+            <CustomerInstallerButton customerId={customer.id} customerName={customer.name} />
             <Badge variant="secondary" className="gap-1">
               <Activity className="h-3 w-3" />
               {recentSessions.filter(s => s.endedAt).length} Sitzungen

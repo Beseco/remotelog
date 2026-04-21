@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const sessionToken = searchParams.get("s")?.toUpperCase();
   const os = searchParams.get("os") === "linux" ? "linux" : "windows";
+  const mode = searchParams.get("mode") === "approval" ? "approval" : "unattended";
 
   if (!sessionToken || !/^[A-Z0-9]{8}$/.test(sessionToken)) {
     return NextResponse.json({ error: "Ungültiger Token" }, { status: 400 });
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
     idServer: org?.rustdeskIdServer ?? "",
     relay: org?.rustdeskRelay ?? "",
     key: org?.rustdeskKey ?? "",
+    mode,
   });
 
   return new NextResponse(cmd, {
@@ -75,16 +77,23 @@ function buildWindowsCmd(p: {
   idServer: string;
   relay: string;
   key: string;
+  mode: string;
 }): string {
+  const isApproval = p.mode === "approval";
   const L: string[] = [];
 
   L.push("@echo off");
   L.push("setlocal enabledelayedexpansion");
   L.push("");
-  // UAC self-elevation via mshta (no PowerShell needed)
-  L.push("net session >nul 2>&1 || (");
-  L.push(`    mshta "vbscript:CreateObject(""Shell.Application"").ShellExecute(""cmd.exe"",""/c """"""%~f0"""""" "","",""runas"",1)(window.close)"`);
-  L.push("    exit /b");
+  // Check admin — show clear error instead of silent re-launch
+  L.push("net session >nul 2>&1");
+  L.push("if errorlevel 1 (");
+  L.push("    echo.");
+  L.push("    echo FEHLER: Dieses Skript muss als Administrator ausgefuehrt werden.");
+  L.push("    echo Rechtsklick auf die Datei und 'Als Administrator ausfuehren' waehlen.");
+  L.push("    echo.");
+  L.push("    pause");
+  L.push("    exit /b 1");
   L.push(")");
   L.push("");
   L.push(`set SESSION_TOKEN=${p.sessionToken}`);
@@ -98,7 +107,7 @@ function buildWindowsCmd(p: {
   L.push("");
   L.push("echo.");
   L.push("echo =================================================");
-  L.push("echo   RemoteLog Fernwartungs-Setup");
+  L.push(`echo   RemoteLog Fernwartungs-Setup (${isApproval ? "Mit Genehmigung" : "Unbeaufsichtigt"})`);
   L.push("echo =================================================");
   L.push("echo.");
   L.push("");
@@ -131,10 +140,17 @@ function buildWindowsCmd(p: {
     L.push("");
   }
 
-  // Step 3: Password (numeric from %RANDOM%, three segments → ~15 digits)
-  L.push("echo [3/4] Zugangsdaten werden gesetzt...");
-  L.push("set PASSWORD=%RANDOM%%RANDOM%%RANDOM%");
-  L.push(`"%RUSTDESK_EXE%" --password %PASSWORD% >nul 2>&1`);
+  // Step 3: Password or approval mode
+  L.push("echo [3/4] RustDesk wird konfiguriert...");
+  if (isApproval) {
+    L.push(":: Genehmigungsmodus: kein Passwort, Nutzer muss jede Verbindung bestaetigen");
+    L.push(`if not exist "%APPDATA%\\RustDesk\\config" mkdir "%APPDATA%\\RustDesk\\config"`);
+    L.push(`(echo approve_mode = "click") >> "%APPDATA%\\RustDesk\\config\\RustDesk2.toml"`);
+    L.push("set PASSWORD=");
+  } else {
+    L.push("set PASSWORD=%RANDOM%%RANDOM%%RANDOM%");
+    L.push(`"%RUSTDESK_EXE%" --password %PASSWORD% >nul 2>&1`);
+  }
   L.push("timeout /t 3 /nobreak >nul");
   L.push("");
 
@@ -157,7 +173,11 @@ function buildWindowsCmd(p: {
   L.push("echo =================================================");
   L.push("echo   Installation abgeschlossen^!");
   L.push("echo   RustDesk-ID: %RUSTDESK_ID%");
-  L.push("echo   Ihr Techniker kann jetzt auf dieses Geraet zugreifen.");
+  if (isApproval) {
+    L.push("echo   Ihr Techniker muss jede Verbindung von Ihnen bestaetigen lassen.");
+  } else {
+    L.push("echo   Ihr Techniker kann sich jetzt jederzeit verbinden.");
+  }
   L.push("echo =================================================");
   L.push("echo.");
   L.push("pause");

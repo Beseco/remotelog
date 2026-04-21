@@ -9,41 +9,54 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { sessionToken, orgToken, email, computerName, rustdeskId, password } =
+  const { sessionToken, orgToken, customerId, mode, email, computerName, rustdeskId, password } =
     body as Record<string, string>;
 
-  if (!rustdeskId || !password) {
-    return NextResponse.json({ error: "Fehlende Pflichtfelder" }, { status: 400 });
+  if (!rustdeskId) {
+    return NextResponse.json({ error: "rustdeskId fehlt" }, { status: 400 });
   }
 
-  // EXE flow: session token already created, just update the record
+  const isApproval = mode === "approval";
+
+  // ── Session-Token-Flow ────────────────────────────────────────────────────
   if (sessionToken) {
     const existing = await prisma.deviceRegistration.findUnique({
       where: { sessionToken: sessionToken.toUpperCase() },
     });
-
     if (!existing) {
       return NextResponse.json({ error: "Ungültiger Session-Token" }, { status: 404 });
     }
+
+    const effectiveCustomerId = existing.customerId ?? customerId?.trim() ?? null;
+    const effectiveMode = existing.mode ?? (isApproval ? "approval" : "unattended");
 
     const updated = await prisma.deviceRegistration.update({
       where: { id: existing.id },
       data: {
         computerName: computerName?.trim() || null,
         rustdeskId: rustdeskId.trim(),
-        password,
+        password: effectiveMode === "approval" ? "" : (password ?? ""),
         status: "pending",
       },
     });
 
-    console.log(
-      `[install/report] Neues Gerät (EXE): ${computerName ?? "unbekannt"} (${rustdeskId}) von ${existing.email ?? "unbekannt"}`
-    );
+    // Auto-assign if customer is pre-set
+    if (effectiveCustomerId) {
+      await autoAssignDevice({
+        organizationId: existing.organizationId,
+        customerId: effectiveCustomerId,
+        registrationId: updated.id,
+        rustdeskId: rustdeskId.trim(),
+        computerName: computerName?.trim() ?? null,
+        password: effectiveMode === "approval" ? null : (password ?? null),
+      });
+    }
 
+    console.log(`[install/report] ${computerName ?? "?"} (${rustdeskId}) mode=${effectiveMode}`);
     return NextResponse.json({ ok: true, id: updated.id });
   }
 
-  // Legacy PS1 flow: orgToken + email
+  // ── OrgToken-Flow (MDM / Kunden-Installer) ────────────────────────────────
   if (!orgToken) {
     return NextResponse.json({ error: "sessionToken oder orgToken erforderlich" }, { status: 400 });
   }
@@ -52,25 +65,72 @@ export async function POST(req: NextRequest) {
     where: { registrationToken: orgToken },
     select: { id: true },
   });
-
   if (!org) {
     return NextResponse.json({ error: "Ungültiger Token" }, { status: 404 });
   }
 
+  const effectiveCustomerId = customerId?.trim() || null;
   const registration = await prisma.deviceRegistration.create({
     data: {
       organizationId: org.id,
       email: email?.trim() || null,
       computerName: computerName?.trim() || null,
+      customerId: effectiveCustomerId,
+      mode: isApproval ? "approval" : "unattended",
       rustdeskId: rustdeskId.trim(),
-      password,
+      password: isApproval ? "" : (password ?? ""),
       status: "pending",
     },
   });
 
-  console.log(
-    `[install/report] Neues Gerät (PS1): ${computerName ?? "unbekannt"} (${rustdeskId}) von ${email ?? "unbekannt"}`
-  );
+  if (effectiveCustomerId) {
+    await autoAssignDevice({
+      organizationId: org.id,
+      customerId: effectiveCustomerId,
+      registrationId: registration.id,
+      rustdeskId: rustdeskId.trim(),
+      computerName: computerName?.trim() ?? null,
+      password: isApproval ? null : (password ?? null),
+    });
+  }
 
+  console.log(`[install/report] ${computerName ?? "?"} (${rustdeskId}) org=${orgToken} customer=${effectiveCustomerId ?? "none"}`);
   return NextResponse.json({ ok: true, id: registration.id });
+}
+
+async function autoAssignDevice(p: {
+  organizationId: string;
+  customerId: string;
+  registrationId: string;
+  rustdeskId: string;
+  computerName: string | null;
+  password: string | null;
+}) {
+  // Skip if RustDesk ID already exists as a device in this org
+  const existing = await prisma.remoteId.findFirst({
+    where: { remoteId: p.rustdeskId, type: "rustdesk", device: { organizationId: p.organizationId } },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const device = await prisma.device.create({
+    data: {
+      name: p.computerName ?? p.rustdeskId,
+      organizationId: p.organizationId,
+      customerId: p.customerId,
+      tags: ["remotelog-installer"],
+      remoteIds: {
+        create: {
+          type: "rustdesk",
+          remoteId: p.rustdeskId,
+          ...(p.password ? { password: p.password } : {}),
+        },
+      },
+    },
+  });
+
+  await prisma.deviceRegistration.update({
+    where: { id: p.registrationId },
+    data: { status: "assigned", deviceId: device.id },
+  });
 }

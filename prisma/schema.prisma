@@ -257,6 +257,8 @@ model DeviceRegistration {
   rustdeskId     String   @default("")
   password       String   @default("") // plain-text, nur kurz gespeichert bis Zuweisung
   sessionToken   String?  @unique      // Einmal-Token aus EXE-Dateiname
+  customerId     String?              // Vorausgewählter Kunde (für Kunden-Installer)
+  mode           String   @default("unattended") // unattended | approval
   status         String   @default("pending") // pending | assigned | ignored
   deviceId       String?  // gesetzt nach Zuweisung
   createdAt      DateTime @default(now())

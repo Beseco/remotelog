@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { orgToken, email } = body as Record<string, string>;
+  const { orgToken, email, customerId, mode } = body as Record<string, string>;
 
   if (!orgToken) {
     return NextResponse.json({ error: "orgToken fehlt" }, { status: 400 });
@@ -54,6 +54,8 @@ export async function POST(req: NextRequest) {
     data: {
       organizationId: org.id,
       email: email?.trim() || null,
+      customerId: customerId?.trim() || null,
+      mode: mode === "approval" ? "approval" : "unattended",
       sessionToken,
       rustdeskId: "",
       password: "",

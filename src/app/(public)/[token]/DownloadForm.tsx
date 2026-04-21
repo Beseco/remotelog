@@ -1,19 +1,27 @@
 "use client";
 
-import { useState } from "react";
-import { Monitor, Download, Apple } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Monitor, Download, Apple, ShieldCheck, Eye } from "lucide-react";
 
 interface Props {
   orgToken: string;
 }
 
-type OS = "windows" | "mac";
+type OS = "windows" | "linux";
+type Mode = "unattended" | "approval";
 
 export function DownloadForm({ orgToken }: Props) {
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState<OS | null>(null);
+  const [mode, setMode] = useState<Mode>("unattended");
+  const [loading, setLoading] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setCustomerId(params.get("c"));
+  }, []);
 
   async function download(os: OS) {
     if (!email.trim()) return;
@@ -24,7 +32,7 @@ export function DownloadForm({ orgToken }: Props) {
       const res = await fetch("/api/v1/install/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orgToken, email: email.trim() }),
+        body: JSON.stringify({ orgToken, email: email.trim(), customerId, mode }),
       });
 
       if (!res.ok) {
@@ -33,9 +41,9 @@ export function DownloadForm({ orgToken }: Props) {
       }
 
       const { sessionToken } = await res.json() as { sessionToken: string };
-      const route = os === "mac"
-        ? `/api/v1/install/script?s=${sessionToken}&os=linux`
-        : `/api/v1/install/script?s=${sessionToken}&os=windows`;
+      const route = os === "linux"
+        ? `/api/v1/install/script?s=${sessionToken}&os=linux&mode=${mode}`
+        : `/api/v1/install/script?s=${sessionToken}&os=windows&mode=${mode}`;
       window.location.href = route;
       setSubmitted(true);
     } catch {
@@ -90,6 +98,35 @@ export function DownloadForm({ orgToken }: Props) {
         <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
       )}
 
+      {/* Mode selection */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-gray-700">Verbindungsmodus</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setMode("unattended")}
+            className={`flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors ${mode === "unattended" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:bg-gray-50"}`}
+          >
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck className={`h-4 w-4 ${mode === "unattended" ? "text-blue-600" : "text-gray-400"}`} />
+              <span className="text-sm font-medium text-gray-900">Unbeaufsichtigt</span>
+            </div>
+            <p className="text-xs text-gray-500">Techniker kann jederzeit zugreifen</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("approval")}
+            className={`flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors ${mode === "approval" ? "border-amber-500 bg-amber-50" : "border-gray-200 hover:bg-gray-50"}`}
+          >
+            <div className="flex items-center gap-1.5">
+              <Eye className={`h-4 w-4 ${mode === "approval" ? "text-amber-600" : "text-gray-400"}`} />
+              <span className="text-sm font-medium text-gray-900">Mit Genehmigung</span>
+            </div>
+            <p className="text-xs text-gray-500">Sie müssen jeden Zugriff bestätigen</p>
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-3">
         <p className="text-sm font-medium text-gray-700">Betriebssystem wählen</p>
 
@@ -105,7 +142,7 @@ export function DownloadForm({ orgToken }: Props) {
           </div>
           <div>
             <p className="font-medium text-gray-900 text-sm">Windows</p>
-            <p className="text-xs text-gray-500">Batch-Datei (.cmd) · Doppelklick zum Starten</p>
+            <p className="text-xs text-gray-500">Batch-Datei (.cmd) · Als Administrator ausführen</p>
           </div>
           {loading === "windows"
             ? <div className="ml-auto h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
@@ -113,21 +150,21 @@ export function DownloadForm({ orgToken }: Props) {
           }
         </button>
 
-        {/* macOS */}
+        {/* Linux */}
         <button
           type="button"
           disabled={!email.trim() || loading !== null}
-          onClick={() => void download("mac")}
+          onClick={() => void download("linux")}
           className="w-full flex items-center gap-3 rounded-xl border border-gray-200 p-4 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 shrink-0">
             <Apple className="h-5 w-5 text-slate-600" />
           </div>
           <div>
-            <p className="font-medium text-gray-900 text-sm">macOS</p>
+            <p className="font-medium text-gray-900 text-sm">Linux</p>
             <p className="text-xs text-gray-500">Shell-Skript (.sh) · sudo bash remotelog-setup.sh</p>
           </div>
-          {loading === "mac"
+          {loading === "linux"
             ? <div className="ml-auto h-4 w-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
             : <Download className="ml-auto h-4 w-4 text-gray-400" />
           }
