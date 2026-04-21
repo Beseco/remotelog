@@ -147,9 +147,11 @@ function buildWindowsCmd(p: {
   L.push(`    set RUSTDESK_ID=!RUSTDESK_ID:"=!`);
   L.push(")");
   L.push("");
-  L.push(`curl -s -X POST "%REPORT_URL%" ^`);
-  L.push(`    -H "Content-Type: application/json" ^`);
-  L.push(`    -d "{\\"sessionToken\\":\\"%SESSION_TOKEN%\\",\\"email\\":\\"%EMAIL%\\",\\"computerName\\":\\"%COMPUTERNAME%\\",\\"rustdeskId\\":\\"%RUSTDESK_ID%\\",\\"password\\":\\"%PASSWORD%\\"}"`);
+  // Write JSON to temp file to avoid CMD quote-escaping issues with curl -d
+  L.push("set JSON_FILE=%TEMP%\\rl-report.json");
+  L.push(`(echo {"sessionToken":"%SESSION_TOKEN%","email":"%EMAIL%","computerName":"%COMPUTERNAME%","rustdeskId":"%RUSTDESK_ID%","password":"%PASSWORD%"}) > "%JSON_FILE%"`);
+  L.push(`curl -s -X POST "%REPORT_URL%" -H "Content-Type: application/json" -d "@%JSON_FILE%"`);
+  L.push(`del "%JSON_FILE%" 2>nul`);
   L.push("");
   L.push("echo.");
   L.push("echo =================================================");
