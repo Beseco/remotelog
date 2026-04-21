@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const script = buildWindowsScript({
+  const cmd = buildWindowsCmd({
     sessionToken,
     email,
     reportUrl,
@@ -60,15 +60,15 @@ export async function GET(req: NextRequest) {
     key: org?.rustdeskKey ?? "",
   });
 
-  return new NextResponse(script, {
+  return new NextResponse(cmd, {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
-      "Content-Disposition": `attachment; filename="remotelog-setup.ps1"`,
+      "Content-Disposition": `attachment; filename="remotelog-setup.cmd"`,
     },
   });
 }
 
-function buildWindowsScript(p: {
+function buildWindowsCmd(p: {
   sessionToken: string;
   email: string;
   reportUrl: string;
@@ -76,116 +76,122 @@ function buildWindowsScript(p: {
   relay: string;
   key: string;
 }): string {
-  const q = (s: string) => s.replace(/"/g, '`"');
+  // Build the PowerShell script as a plain string
+  const ps = buildWindowsPowerShell(p);
+
+  // PowerShell -EncodedCommand expects UTF-16LE Base64
+  const encoded = Buffer.from(ps, "utf16le").toString("base64");
+
+  // CMD wrapper: self-elevates via UAC, then runs encoded PowerShell
+  const cmd = [
+    "@echo off",
+    "net session >nul 2>&1 || (",
+    "    powershell -Command \"Start-Process cmd -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs\"",
+    "    exit /b",
+    ")",
+    `powershell -ExecutionPolicy Bypass -NoProfile -EncodedCommand ${encoded}`,
+    "exit /b",
+  ].join("\r\n");
+
+  return cmd;
+}
+
+function buildWindowsPowerShell(p: {
+  sessionToken: string;
+  email: string;
+  reportUrl: string;
+  idServer: string;
+  relay: string;
+  key: string;
+}): string {
+  const q = (s: string) => s.replace(/"/g, '\\"');
   const lines: string[] = [];
 
-  lines.push("# RemoteLog Fernwartungs-Setup");
-  lines.push("# Rechtsklick -> Mit PowerShell ausfuehren");
+  lines.push("$ErrorActionPreference = 'Stop'");
+  lines.push(`$sessionToken = '${p.sessionToken}'`);
+  lines.push(`$email        = '${p.email.replace(/'/g, "''")}'`);
+  lines.push(`$reportUrl    = '${p.reportUrl}'`);
   lines.push("");
-  lines.push("$ErrorActionPreference = \"Stop\"");
-  lines.push(`$sessionToken = "${p.sessionToken}"`);
-  lines.push(`$email        = "${q(p.email)}"`);
-  lines.push(`$reportUrl    = "${p.reportUrl}"`);
-  lines.push("");
-  // Self-elevate
-  lines.push("if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {");
-  lines.push("    Start-Process powershell -ArgumentList \"-ExecutionPolicy Bypass -File '$($MyInvocation.MyCommand.Path)'\" -Verb RunAs");
-  lines.push("    exit");
-  lines.push("}");
-  lines.push("");
-  lines.push("Write-Host \"\" ");
-  lines.push("Write-Host \"=================================================\"  -ForegroundColor Cyan");
-  lines.push("Write-Host \"  RemoteLog Fernwartungs-Setup\"                     -ForegroundColor Cyan");
-  lines.push("Write-Host \"=================================================\"  -ForegroundColor Cyan");
-  lines.push("Write-Host \"\" ");
+  lines.push("Write-Host ''");
+  lines.push("Write-Host '=================================================' -ForegroundColor Cyan");
+  lines.push("Write-Host '  RemoteLog Fernwartungs-Setup'                    -ForegroundColor Cyan");
+  lines.push("Write-Host '=================================================' -ForegroundColor Cyan");
+  lines.push("Write-Host ''");
   lines.push("");
 
   // Step 1: Download
-  lines.push("Write-Host \"[1/4] RustDesk wird heruntergeladen...\" -ForegroundColor White");
-  lines.push("$rustdeskUrl = \"https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.exe\"");
+  lines.push("Write-Host '[1/4] RustDesk wird heruntergeladen...' -ForegroundColor White");
+  lines.push("$rustdeskUrl = 'https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.exe'");
   lines.push("$installer   = \"$env:TEMP\\rustdesk-installer.exe\"");
   lines.push("try {");
   lines.push("    Invoke-WebRequest -Uri $rustdeskUrl -OutFile $installer -UseBasicParsing");
   lines.push("} catch {");
-  lines.push("    Write-Host \"Fehler beim Download.\" -ForegroundColor Red");
-  lines.push("    Read-Host \"Enter druecken zum Beenden\"");
+  lines.push("    Write-Host 'Fehler beim Download.' -ForegroundColor Red");
+  lines.push("    Read-Host 'Enter druecken zum Beenden'");
   lines.push("    exit 1");
   lines.push("}");
   lines.push("");
 
   // Step 2: Install
-  lines.push("Write-Host \"[2/4] RustDesk wird installiert...\" -ForegroundColor White");
-  lines.push("Start-Process -FilePath $installer -ArgumentList \"--silent-install\" -Wait -NoNewWindow");
+  lines.push("Write-Host '[2/4] RustDesk wird installiert...' -ForegroundColor White");
+  lines.push("Start-Process -FilePath $installer -ArgumentList '--silent-install' -Wait -NoNewWindow");
   lines.push("Start-Sleep -Seconds 5");
   lines.push("");
   lines.push("$rustdeskExe = $null");
-  lines.push("@(\"$env:ProgramFiles\\RustDesk\\rustdesk.exe\", \"${env:ProgramFiles(x86)}\\RustDesk\\rustdesk.exe\") | ForEach-Object {");
+  lines.push("@(\"$env:ProgramFiles\\RustDesk\\rustdesk.exe\", \"$env:ProgramFiles\\RustDesk\\rustdesk.exe\") | ForEach-Object {");
   lines.push("    if (-not $rustdeskExe -and (Test-Path $_)) { $rustdeskExe = $_ }");
   lines.push("}");
   lines.push("if (-not $rustdeskExe) {");
-  lines.push("    Write-Host \"RustDesk wurde nicht gefunden.\" -ForegroundColor Red");
-  lines.push("    Read-Host \"Enter druecken zum Beenden\"");
+  lines.push("    Write-Host 'RustDesk wurde nicht gefunden.' -ForegroundColor Red");
+  lines.push("    Read-Host 'Enter druecken zum Beenden'");
   lines.push("    exit 1");
   lines.push("}");
   lines.push("");
 
-  // Step 2a: Server config (only if configured)
+  // Server config
   if (p.idServer) {
-    lines.push("# Server-Konfiguration");
     lines.push("$configDir = \"$env:APPDATA\\RustDesk\\config\"");
     lines.push("if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }");
-    lines.push("$tomlContent = @(");
-    lines.push(`    "relay_server = \\"${p.relay}\\"",`);
-    lines.push(`    "id_server = \\"${p.idServer}\\"",`);
-    lines.push(`    "key = \\"${p.key}\\""`);
-    lines.push(") -join \"`n\"");
-    lines.push("$tomlContent | Set-Content \"$configDir\\RustDesk2.toml\" -Encoding UTF8");
+    lines.push(`@('relay_server = \"${q(p.relay)}\"', 'id_server = \"${q(p.idServer)}\"', 'key = \"${q(p.key)}\"') -join \`n | Set-Content \"$configDir\\RustDesk2.toml\" -Encoding UTF8`);
     lines.push("");
   }
 
   // Step 3: Password
-  lines.push("Write-Host \"[3/4] Zugangsdaten werden gesetzt...\" -ForegroundColor White");
-  lines.push("$chars    = \"abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789\"");
+  lines.push("Write-Host '[3/4] Zugangsdaten werden gesetzt...' -ForegroundColor White");
+  lines.push("$chars    = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'");
   lines.push("$password = -join ((1..12) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })");
   lines.push("& $rustdeskExe --password $password | Out-Null");
   lines.push("Start-Sleep -Seconds 3");
   lines.push("");
 
-  // Step 4: Get ID and register
-  lines.push("Write-Host \"[4/4] Geraet wird registriert...\" -ForegroundColor White");
-  lines.push("$rustdeskId = (& $rustdeskExe --get-id 2>$null) -replace \"\\s\",\"\"");
+  // Step 4: Register
+  lines.push("Write-Host '[4/4] Geraet wird registriert...' -ForegroundColor White");
+  lines.push("$rustdeskId = (& $rustdeskExe --get-id 2>$null) -replace '\\s',''");
   lines.push("if (-not $rustdeskId) {");
   lines.push("    $cfg = \"$env:APPDATA\\RustDesk\\config\\RustDesk.toml\"");
   lines.push("    if (Test-Path $cfg) {");
-  lines.push("        $line = Get-Content $cfg | Where-Object { $_ -match \"^id\\s*=\" }");
-  lines.push("        if ($line) { $rustdeskId = ($line -split \"=\",2)[1].Trim().Trim('\"') }");
+  lines.push("        $ln = Get-Content $cfg | Where-Object { $_ -match '^id\\s*=' }");
+  lines.push("        if ($ln) { $rustdeskId = ($ln -split '=',2)[1].Trim().Trim('\"') }");
   lines.push("    }");
   lines.push("}");
   lines.push("");
-  lines.push("$body = @{");
-  lines.push("    sessionToken = $sessionToken");
-  lines.push("    email        = $email");
-  lines.push("    computerName = $env:COMPUTERNAME");
-  lines.push("    rustdeskId   = $rustdeskId");
-  lines.push("    password     = $password");
-  lines.push("} | ConvertTo-Json");
-  lines.push("");
+  lines.push("$body = @{ sessionToken=$sessionToken; email=$email; computerName=$env:COMPUTERNAME; rustdeskId=$rustdeskId; password=$password } | ConvertTo-Json");
   lines.push("try {");
-  lines.push("    Invoke-RestMethod -Uri $reportUrl -Method POST -Body $body -ContentType \"application/json\" | Out-Null");
+  lines.push("    Invoke-RestMethod -Uri $reportUrl -Method POST -Body $body -ContentType 'application/json' | Out-Null");
   lines.push("} catch {");
   lines.push("    Write-Host \"Warnung: Registrierung fehlgeschlagen: $_\" -ForegroundColor Yellow");
   lines.push("}");
   lines.push("");
-  lines.push("Write-Host \"\" ");
-  lines.push("Write-Host \"=================================================\"  -ForegroundColor Green");
-  lines.push("Write-Host \"  Installation abgeschlossen!\"                      -ForegroundColor Green");
-  lines.push("Write-Host \"  RustDesk-ID: $rustdeskId\"                         -ForegroundColor Green");
-  lines.push("Write-Host \"  Ihr Techniker kann jetzt auf dieses Geraet zugreifen.\" -ForegroundColor Green");
-  lines.push("Write-Host \"=================================================\"  -ForegroundColor Green");
-  lines.push("Write-Host \"\" ");
-  lines.push("Read-Host \"Enter druecken zum Beenden\"");
+  lines.push("Write-Host ''");
+  lines.push("Write-Host '=================================================' -ForegroundColor Green");
+  lines.push("Write-Host '  Installation abgeschlossen!'                     -ForegroundColor Green");
+  lines.push("Write-Host \"  RustDesk-ID: $rustdeskId\"                        -ForegroundColor Green");
+  lines.push("Write-Host '  Ihr Techniker kann jetzt auf dieses Geraet zugreifen.' -ForegroundColor Green");
+  lines.push("Write-Host '=================================================' -ForegroundColor Green");
+  lines.push("Write-Host ''");
+  lines.push("Read-Host 'Enter druecken zum Beenden'");
 
-  return lines.join("\r\n");
+  return lines.join("\n");
 }
 
 function buildLinuxScript(p: {

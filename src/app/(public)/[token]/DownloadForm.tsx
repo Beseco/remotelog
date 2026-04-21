@@ -53,7 +53,7 @@ export function DownloadForm({ orgToken }: Props) {
         </div>
         <h2 className="text-lg font-semibold text-gray-900">Download gestartet</h2>
         <p className="text-sm text-gray-500">
-          Windows: Rechtsklick auf die .ps1-Datei → <strong>Mit PowerShell ausführen</strong><br />
+          Windows: Doppelklick auf <strong>remotelog-setup.cmd</strong>, dann UAC-Anfrage bestätigen.<br />
           Linux: <code className="text-xs bg-gray-100 px-1 rounded">sudo bash remotelog-setup.sh</code>
         </p>
         <button
@@ -105,7 +105,7 @@ export function DownloadForm({ orgToken }: Props) {
           </div>
           <div>
             <p className="font-medium text-gray-900 text-sm">Windows</p>
-            <p className="text-xs text-gray-500">PowerShell-Skript (.ps1) · Rechtsklick → Mit PowerShell ausführen</p>
+            <p className="text-xs text-gray-500">Batch-Datei (.cmd) · Doppelklick zum Starten</p>
           </div>
           {loading === "windows"
             ? <div className="ml-auto h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
