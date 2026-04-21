@@ -24,8 +24,7 @@ Self-hosted Open-Source Web-App (AGPL-3.0) für IT-Dienstleister zur Verwaltung 
 - **Addons** — Integrationen zu externen Systemen (Proxmox, Zammad, Invoice Ninja)
 
 <p align="center">
-  <img src="docs/images/RemoteLog-02.png" alt="RemoteLog Features" width="49%" />
-  <img src="docs/images/RemoteLog-03.png" alt="RemoteLog Interface" width="49%" />
+  <img src="docs/images/RemoteLog-02.png" alt="RemoteLog Features" width="100%" />
 </p>
 
 ---
