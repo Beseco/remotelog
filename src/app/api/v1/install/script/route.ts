@@ -11,7 +11,7 @@ async function loadOrgBySession(sessionToken: string) {
   if (!reg) return null;
   const org = await prisma.organization.findUnique({
     where: { id: reg.organizationId },
-    select: { rustdeskIdServer: true, rustdeskRelay: true, rustdeskKey: true },
+    select: { rustdeskIdServer: true, rustdeskRelay: true, rustdeskKey: true, appUrl: true },
   });
   return { org, email: reg.email ?? "" };
 }
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Token nicht gefunden" }, { status: 404 });
   }
 
-  const baseUrl = (process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "");
+  const baseUrl = (org?.appUrl ?? process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "");
   const reportUrl = `${baseUrl}/api/v1/install/report`;
   const { org, email } = result;
 

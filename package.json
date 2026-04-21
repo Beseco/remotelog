@@ -1,6 +1,6 @@
 {
   "name": "remotelog",
-  "version": "2026.04.34",
+  "version": "2026.04.35",
   "private": true,
   "scripts": {
     "dev": "next dev",

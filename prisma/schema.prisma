@@ -27,6 +27,9 @@ model Organization {
   rustdeskKey           String?
   rustdeskApiPasswordEnc String? // AES-256-GCM encrypted hbbs admin API password
 
+  // Public base URL of this instance (DB first, NEXTAUTH_URL env fallback)
+  appUrl String?
+
   // Setup wizard status + SMTP config (DB first, env fallback)
   setupCompletedAt DateTime?
   smtpHost         String?

@@ -7,6 +7,9 @@ import { UserManagement } from "@/components/settings/user-management";
 import { AddonsSection } from "@/components/settings/addons-section";
 import { ResellerAdminSection } from "@/components/settings/reseller-admin-section";
 import { ExportImportSection } from "@/components/settings/export-import";
+import { AppUrlForm } from "@/components/settings/app-url-form";
+import { Globe } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function AdminSettingsPage() {
   const session = await requireAuth();
@@ -18,6 +21,7 @@ export default async function AdminSettingsPage() {
       select: {
         id: true, name: true,
         hourlyRate: true, roundUpMins: true, prepMins: true, followUpMins: true, minMins: true,
+        appUrl: true,
       },
     }),
     prisma.user.findMany({
@@ -53,6 +57,21 @@ export default async function AdminSettingsPage() {
       </div>
 
       {org && <OrgForm initialName={org.name} />}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Globe className="h-4 w-4" />
+            App-URL
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AppUrlForm
+            initial={org?.appUrl ?? null}
+            envFallback={process.env.NEXTAUTH_URL ?? ""}
+          />
+        </CardContent>
+      </Card>
 
       {org && (
         <BillingForm
