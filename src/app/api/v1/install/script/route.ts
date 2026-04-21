@@ -76,122 +76,91 @@ function buildWindowsCmd(p: {
   relay: string;
   key: string;
 }): string {
-  // Build the PowerShell script as a plain string
-  const ps = buildWindowsPowerShell(p);
+  const L: string[] = [];
 
-  // PowerShell -EncodedCommand expects UTF-16LE Base64
-  const encoded = Buffer.from(ps, "utf16le").toString("base64");
-
-  // CMD wrapper: self-elevates via UAC, then runs encoded PowerShell
-  const cmd = [
-    "@echo off",
-    "net session >nul 2>&1 || (",
-    "    powershell -Command \"Start-Process cmd -ArgumentList '/c \"\"%~f0\"\"' -Verb RunAs\"",
-    "    exit /b",
-    ")",
-    `powershell -ExecutionPolicy Bypass -NoProfile -EncodedCommand ${encoded}`,
-    "exit /b",
-  ].join("\r\n");
-
-  return cmd;
-}
-
-function buildWindowsPowerShell(p: {
-  sessionToken: string;
-  email: string;
-  reportUrl: string;
-  idServer: string;
-  relay: string;
-  key: string;
-}): string {
-  const q = (s: string) => s.replace(/"/g, '\\"');
-  const lines: string[] = [];
-
-  lines.push("$ErrorActionPreference = 'Stop'");
-  lines.push(`$sessionToken = '${p.sessionToken}'`);
-  lines.push(`$email        = '${p.email.replace(/'/g, "''")}'`);
-  lines.push(`$reportUrl    = '${p.reportUrl}'`);
-  lines.push("");
-  lines.push("Write-Host ''");
-  lines.push("Write-Host '=================================================' -ForegroundColor Cyan");
-  lines.push("Write-Host '  RemoteLog Fernwartungs-Setup'                    -ForegroundColor Cyan");
-  lines.push("Write-Host '=================================================' -ForegroundColor Cyan");
-  lines.push("Write-Host ''");
-  lines.push("");
+  L.push("@echo off");
+  L.push("setlocal enabledelayedexpansion");
+  L.push("");
+  // UAC self-elevation via mshta (no PowerShell needed)
+  L.push("net session >nul 2>&1 || (");
+  L.push(`    mshta "vbscript:CreateObject(""Shell.Application"").ShellExecute(""cmd.exe"",""/c """"""%~f0"""""" "","",""runas"",1)(window.close)"`);
+  L.push("    exit /b");
+  L.push(")");
+  L.push("");
+  L.push(`set SESSION_TOKEN=${p.sessionToken}`);
+  L.push(`set EMAIL=${p.email}`);
+  L.push(`set REPORT_URL=${p.reportUrl}`);
+  if (p.idServer) {
+    L.push(`set ID_SERVER=${p.idServer}`);
+    L.push(`set RELAY_SERVER=${p.relay}`);
+    L.push(`set RUSTDESK_KEY=${p.key}`);
+  }
+  L.push("");
+  L.push("echo.");
+  L.push("echo =================================================");
+  L.push("echo   RemoteLog Fernwartungs-Setup");
+  L.push("echo =================================================");
+  L.push("echo.");
+  L.push("");
 
   // Step 1: Download
-  lines.push("Write-Host '[1/4] RustDesk wird heruntergeladen...' -ForegroundColor White");
-  lines.push("$rustdeskUrl = 'https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.exe'");
-  lines.push("$installer   = \"$env:TEMP\\rustdesk-installer.exe\"");
-  lines.push("try {");
-  lines.push("    Invoke-WebRequest -Uri $rustdeskUrl -OutFile $installer -UseBasicParsing");
-  lines.push("} catch {");
-  lines.push("    Write-Host 'Fehler beim Download.' -ForegroundColor Red");
-  lines.push("    Read-Host 'Enter druecken zum Beenden'");
-  lines.push("    exit 1");
-  lines.push("}");
-  lines.push("");
+  L.push("echo [1/4] RustDesk wird heruntergeladen...");
+  L.push(`curl -L --progress-bar -o "%TEMP%\\rustdesk-installer.exe" "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.exe"`);
+  L.push("if errorlevel 1 ( echo Fehler beim Download. & pause & exit /b 1 )");
+  L.push("");
 
   // Step 2: Install
-  lines.push("Write-Host '[2/4] RustDesk wird installiert...' -ForegroundColor White");
-  lines.push("Start-Process -FilePath $installer -ArgumentList '--silent-install' -Wait -NoNewWindow");
-  lines.push("Start-Sleep -Seconds 5");
-  lines.push("");
-  lines.push("$rustdeskExe = $null");
-  lines.push("@(\"$env:ProgramFiles\\RustDesk\\rustdesk.exe\", \"$env:ProgramFiles\\RustDesk\\rustdesk.exe\") | ForEach-Object {");
-  lines.push("    if (-not $rustdeskExe -and (Test-Path $_)) { $rustdeskExe = $_ }");
-  lines.push("}");
-  lines.push("if (-not $rustdeskExe) {");
-  lines.push("    Write-Host 'RustDesk wurde nicht gefunden.' -ForegroundColor Red");
-  lines.push("    Read-Host 'Enter druecken zum Beenden'");
-  lines.push("    exit 1");
-  lines.push("}");
-  lines.push("");
+  L.push("echo [2/4] RustDesk wird installiert...");
+  L.push(`start /wait "" "%TEMP%\\rustdesk-installer.exe" --silent-install`);
+  L.push("timeout /t 5 /nobreak >nul");
+  L.push("");
+  L.push("set RUSTDESK_EXE=");
+  L.push(`if exist "%ProgramFiles%\\RustDesk\\rustdesk.exe" set "RUSTDESK_EXE=%ProgramFiles%\\RustDesk\\rustdesk.exe"`);
+  L.push(`if exist "%ProgramFiles(x86)%\\RustDesk\\rustdesk.exe" set "RUSTDESK_EXE=%ProgramFiles(x86)%\\RustDesk\\rustdesk.exe"`);
+  L.push("if not defined RUSTDESK_EXE ( echo RustDesk nicht gefunden. & pause & exit /b 1 )");
+  L.push("");
 
-  // Server config
+  // Server config (only if configured)
   if (p.idServer) {
-    lines.push("$configDir = \"$env:APPDATA\\RustDesk\\config\"");
-    lines.push("if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }");
-    lines.push(`@('relay_server = \"${q(p.relay)}\"', 'id_server = \"${q(p.idServer)}\"', 'key = \"${q(p.key)}\"') -join \`n | Set-Content \"$configDir\\RustDesk2.toml\" -Encoding UTF8`);
-    lines.push("");
+    L.push(`if not exist "%APPDATA%\\RustDesk\\config" mkdir "%APPDATA%\\RustDesk\\config"`);
+    L.push(`(`);
+    L.push(`    echo relay_server = "%RELAY_SERVER%"`);
+    L.push(`    echo id_server = "%ID_SERVER%"`);
+    L.push(`    echo key = "%RUSTDESK_KEY%"`);
+    L.push(`) > "%APPDATA%\\RustDesk\\config\\RustDesk2.toml"`);
+    L.push("");
   }
 
-  // Step 3: Password
-  lines.push("Write-Host '[3/4] Zugangsdaten werden gesetzt...' -ForegroundColor White");
-  lines.push("$chars    = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'");
-  lines.push("$password = -join ((1..12) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })");
-  lines.push("& $rustdeskExe --password $password | Out-Null");
-  lines.push("Start-Sleep -Seconds 3");
-  lines.push("");
+  // Step 3: Password (numeric from %RANDOM%, three segments → ~15 digits)
+  L.push("echo [3/4] Zugangsdaten werden gesetzt...");
+  L.push("set PASSWORD=%RANDOM%%RANDOM%%RANDOM%");
+  L.push(`"%RUSTDESK_EXE%" --password %PASSWORD% >nul 2>&1`);
+  L.push("timeout /t 3 /nobreak >nul");
+  L.push("");
 
-  // Step 4: Register
-  lines.push("Write-Host '[4/4] Geraet wird registriert...' -ForegroundColor White");
-  lines.push("$rustdeskId = (& $rustdeskExe --get-id 2>$null) -replace '\\s',''");
-  lines.push("if (-not $rustdeskId) {");
-  lines.push("    $cfg = \"$env:APPDATA\\RustDesk\\config\\RustDesk.toml\"");
-  lines.push("    if (Test-Path $cfg) {");
-  lines.push("        $ln = Get-Content $cfg | Where-Object { $_ -match '^id\\s*=' }");
-  lines.push("        if ($ln) { $rustdeskId = ($ln -split '=',2)[1].Trim().Trim('\"') }");
-  lines.push("    }");
-  lines.push("}");
-  lines.push("");
-  lines.push("$body = @{ sessionToken=$sessionToken; email=$email; computerName=$env:COMPUTERNAME; rustdeskId=$rustdeskId; password=$password } | ConvertTo-Json");
-  lines.push("try {");
-  lines.push("    Invoke-RestMethod -Uri $reportUrl -Method POST -Body $body -ContentType 'application/json' | Out-Null");
-  lines.push("} catch {");
-  lines.push("    Write-Host \"Warnung: Registrierung fehlgeschlagen: $_\" -ForegroundColor Yellow");
-  lines.push("}");
-  lines.push("");
-  lines.push("Write-Host ''");
-  lines.push("Write-Host '=================================================' -ForegroundColor Green");
-  lines.push("Write-Host '  Installation abgeschlossen!'                     -ForegroundColor Green");
-  lines.push("Write-Host \"  RustDesk-ID: $rustdeskId\"                        -ForegroundColor Green");
-  lines.push("Write-Host '  Ihr Techniker kann jetzt auf dieses Geraet zugreifen.' -ForegroundColor Green");
-  lines.push("Write-Host '=================================================' -ForegroundColor Green");
-  lines.push("Write-Host ''");
-  lines.push("Read-Host 'Enter druecken zum Beenden'");
+  // Step 4: Get ID and register
+  L.push("echo [4/4] Geraet wird registriert...");
+  L.push(`for /f "tokens=* usebackq" %%i in (\`"%RUSTDESK_EXE%" --get-id 2^>nul\`) do set RUSTDESK_ID=%%i`);
+  L.push("if not defined RUSTDESK_ID (");
+  L.push(`    for /f "tokens=2 delims==" %%i in ('findstr /b "id " "%APPDATA%\\RustDesk\\config\\RustDesk.toml" 2^>nul') do set RUSTDESK_ID=%%i`);
+  L.push("    set RUSTDESK_ID=!RUSTDESK_ID: =!");
+  L.push(`    set RUSTDESK_ID=!RUSTDESK_ID:"=!`);
+  L.push(")");
+  L.push("");
+  L.push(`curl -s -X POST "%REPORT_URL%" ^`);
+  L.push(`    -H "Content-Type: application/json" ^`);
+  L.push(`    -d "{\\"sessionToken\\":\\"%SESSION_TOKEN%\\",\\"email\\":\\"%EMAIL%\\",\\"computerName\\":\\"%COMPUTERNAME%\\",\\"rustdeskId\\":\\"%RUSTDESK_ID%\\",\\"password\\":\\"%PASSWORD%\\"}"`);
+  L.push("");
+  L.push("echo.");
+  L.push("echo =================================================");
+  L.push("echo   Installation abgeschlossen^!");
+  L.push("echo   RustDesk-ID: %RUSTDESK_ID%");
+  L.push("echo   Ihr Techniker kann jetzt auf dieses Geraet zugreifen.");
+  L.push("echo =================================================");
+  L.push("echo.");
+  L.push("pause");
 
-  return lines.join("\n");
+  return L.join("\r\n");
 }
 
 function buildLinuxScript(p: {
