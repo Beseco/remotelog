@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: remotelog
+      POSTGRES_PASSWORD: remotelog
+      POSTGRES_DB: remotelog
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remotelog"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Runs DB migrations + seed using the builder stage (has full node_modules)
+  migrate:
+    build:
+      context: .
+      target: builder
+    command: >
+      sh -c "
+        node node_modules/prisma/build/index.js migrate deploy &&
+        npm run db:seed
+      "
+    environment:
+      DATABASE_URL: postgresql://remotelog:remotelog@db:5432/remotelog
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://remotelog:remotelog@db:5432/remotelog
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      REMOTELOG_API_KEY_SECRET: ${REMOTELOG_API_KEY_SECRET}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

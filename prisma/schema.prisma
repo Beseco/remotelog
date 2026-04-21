@@ -1,0 +1,344 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id           String   @id @default(cuid())
+  name         String
+  createdAt    DateTime @default(now())
+  // Billing settings
+  hourlyRate   Float    @default(0)
+  roundUpMins  Int      @default(15)
+  prepMins     Int      @default(0)
+  followUpMins Int      @default(0)
+  minMins      Int      @default(0)
+
+  // Public installer download token (used in /download/[token] URL)
+  registrationToken String? @unique
+
+  // RustDesk custom server configuration (optional)
+  rustdeskIdServer      String?
+  rustdeskRelay         String?
+  rustdeskKey           String?
+  rustdeskApiPasswordEnc String? // AES-256-GCM encrypted hbbs admin API password
+
+  // Setup wizard status + SMTP config (DB first, env fallback)
+  setupCompletedAt DateTime?
+  smtpHost         String?
+  smtpPort         Int?
+  smtpSecure       Boolean?
+  smtpUser         String?
+  smtpPass         String?
+  smtpFrom         String?
+
+  users               User[]
+  groups              Group[]
+  devices             Device[]
+  customers           Customer[]
+  addons              Addon[]
+  projects            Project[]
+  subscription        Subscription?
+  deviceRegistrations DeviceRegistration[]
+}
+
+// ── Reseller / SaaS ──────────────────────────────────────────────────────────
+// These two models are only active when RESELLER_MODE=true.
+// To remove: delete Plan + Subscription models, remove Organization.subscription.
+
+model Plan {
+  id           String   @id @default(cuid())
+  name         String                          // "Free" | "Starter" | "Professional"
+  price        Float                           // EUR/Monat
+  maxCustomers Int?                            // null = unbegrenzt
+  maxProjects  Int?
+  maxDevices   Int?
+  maxUsers     Int?
+  paypalPlanId String?                         // PayPal Plan-ID (Sandbox oder Live)
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                   String    @id @default(cuid())
+  organizationId       String    @unique
+  planId               String
+  status               String    @default("trialing") // trialing|active|cancelled|past_due
+  paypalSubscriptionId String?
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+}
+
+model Addon {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  enabled        Boolean  @default(false)
+  config         Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+}
+
+model Customer {
+  id             String   @id @default(cuid())
+  name           String
+  notes          String?
+  organizationId String
+  createdAt      DateTime @default(now())
+  zammadOrgId     Int?
+  invoiceNinjaId  String?
+  customerNumber String?
+  email          String?
+  phone          String?
+  website        String?
+  street         String?
+  zip            String?
+  city           String?
+  country        String?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  contacts     Contact[]
+  devices      Device[]
+  groups       Group[]
+  sessions     Session[]
+  projects     Project[]
+
+  @@unique([organizationId, zammadOrgId])
+}
+
+model Contact {
+  id           String   @id @default(cuid())
+  customerId   String
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  mobile       String?
+  emails       String[] @default([])
+  phones       String[] @default([])
+  notes        String?
+  createdAt    DateTime @default(now())
+  zammadUserId   Int?
+  invoiceNinjaId String?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  devices  Device[]
+  sessions Session[]
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           String    @default("techniker") // admin | techniker | readonly
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  lastLogin      DateTime?
+  organizationId String
+
+  // Profile fields (optional, used in reseller registration)
+  firstName  String?
+  lastName   String?
+  company    String?
+  street     String?
+  zip        String?
+  city       String?
+  country    String?
+
+  // E-Mail verification (only enforced when RESELLER_MODE=true)
+  emailVerifiedAt          DateTime?
+  verificationToken        String?   @unique
+  verificationTokenExpiresAt DateTime?
+
+  notifIntervalMins   Int     @default(5)
+  notifSoundEnabled   Boolean @default(true)
+  notifDesktopEnabled Boolean @default(true)
+  notifBadgeEnabled   Boolean @default(true)
+
+  organization     Organization      @relation(fields: [organizationId], references: [id])
+  groupPermissions GroupPermission[]
+  sessions         Session[]
+  apiKeys          ApiKey[]
+}
+
+model Group {
+  id             String  @id @default(cuid())
+  name           String
+  parentId       String?
+  organizationId String
+  customerId     String?
+  sortOrder      Int     @default(0)
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  customer     Customer?         @relation(fields: [customerId], references: [id])
+  parent       Group?            @relation("GroupHierarchy", fields: [parentId], references: [id])
+  children     Group[]           @relation("GroupHierarchy")
+  permissions  GroupPermission[]
+  devices      Device[]
+}
+
+model GroupPermission {
+  userId     String
+  groupId    String
+  permission String // group_admin | group_connect | group_wol | group_readonly | group_none
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+}
+
+model Device {
+  id             String   @id @default(cuid())
+  name           String
+  groupId        String?
+  customerId     String?
+  contactId      String?
+  organizationId String
+  macAddress     String?
+  ipAddress      String?
+  notes          String?
+  tags           String[] @default([])
+  createdAt      DateTime @default(now())
+
+  organization          Organization         @relation(fields: [organizationId], references: [id])
+  group                 Group?               @relation(fields: [groupId], references: [id])
+  customer              Customer?            @relation(fields: [customerId], references: [id])
+  contact               Contact?             @relation(fields: [contactId], references: [id])
+  remoteIds             RemoteId[]
+  sessions              Session[]
+  deviceRegistrations   DeviceRegistration[]
+}
+
+model RemoteId {
+  id       String @id @default(cuid())
+  deviceId String
+  type     String // rustdesk | teamviewer | anydesk | rdp | ssh | vnc
+  remoteId String
+  label    String?
+  password String? // permanent password (e.g. RustDesk)
+
+  // SSH-specific credentials
+  sshUser          String? // SSH username
+  sshPasswordEnc   String? // AES-256-GCM encrypted password (format: "iv:authTag:ciphertext" base64)
+  sshPrivateKeyEnc String? // AES-256-GCM encrypted PEM private key
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+}
+
+// ── Installer-Registrierungen ────────────────────────────────────────────────
+// Geräte die sich nach der Installation melden, noch nicht zugewiesen.
+
+model DeviceRegistration {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String?
+  computerName   String?
+  rustdeskId     String   @default("")
+  password       String   @default("") // plain-text, nur kurz gespeichert bis Zuweisung
+  sessionToken   String?  @unique      // Einmal-Token aus EXE-Dateiname
+  status         String   @default("pending") // pending | assigned | ignored
+  deviceId       String?  // gesetzt nach Zuweisung
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  device       Device?      @relation(fields: [deviceId], references: [id])
+}
+
+
+
+model Session {
+  id              String    @id @default(cuid())
+  deviceId        String?
+  customerId      String?
+  contactId       String?
+  projectId       String?
+  userId          String
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  durationMinutes Int?
+  type            String    @default("remote") // remote | onsite | phone
+  tags            String[]  @default([])
+  billed             Boolean   @default(false)
+  billedAt           DateTime?
+  parentSessionId    String?
+  invoiceNinjaTaskId String?
+
+  device   Device?   @relation(fields: [deviceId],   references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  contact  Contact?  @relation(fields: [contactId],  references: [id])
+  project  Project?  @relation(fields: [projectId],  references: [id])
+  user     User      @relation(fields: [userId],      references: [id])
+  parent   Session?  @relation("SessionHierarchy", fields: [parentSessionId], references: [id])
+  children Session[] @relation("SessionHierarchy")
+  notes     SessionNote[]
+  intervals SessionInterval[]
+}
+
+model SessionNote {
+  id        String   @id @default(cuid())
+  sessionId String
+  content   String
+  createdAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model SessionInterval {
+  id        String    @id @default(cuid())
+  sessionId String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String    @unique
+  type        String    @default("readonly") // setup | full | readonly
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  ipWhitelist String[]  @default([])
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id                    String    @id @default(cuid())
+  organizationId        String
+  customerId            String
+  name                  String
+  status                String    @default("active") // active | completed | paused
+  taskRate              Float?
+  dueDate               DateTime?
+  notes                 String?
+  budgetedHours         Float?
+  invoiceNinjaProjectId String?
+  createdAt             DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+}
