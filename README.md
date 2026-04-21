@@ -2,6 +2,10 @@
 
 Self-hosted Open-Source Web-App (AGPL-3.0) für IT-Dienstleister zur Verwaltung von Remote-Verbindungen, Tätigkeitsnachweisen, Zeiterfassung und Geräteverwaltung.
 
+<p align="center">
+  <img src="docs/images/RemoteLog-01.png" alt="RemoteLog Übersicht" width="100%" />
+</p>
+
 ---
 
 ## Features
@@ -18,6 +22,11 @@ Self-hosted Open-Source Web-App (AGPL-3.0) für IT-Dienstleister zur Verwaltung 
 - **API-Keys** — Maschinenlesbare REST-API (Read-only & Full-Access)
 - **Rollen** — Admin, Techniker, Readonly
 - **Addons** — Integrationen zu externen Systemen (Proxmox, Zammad, Invoice Ninja)
+
+<p align="center">
+  <img src="docs/images/RemoteLog-02.png" alt="RemoteLog Features" width="49%" />
+  <img src="docs/images/RemoteLog-03.png" alt="RemoteLog Interface" width="49%" />
+</p>
 
 ---
 
