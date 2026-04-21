@@ -30,9 +30,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Token nicht gefunden" }, { status: 404 });
   }
 
+  const { org, email } = result;
   const baseUrl = (org?.appUrl ?? process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "");
   const reportUrl = `${baseUrl}/api/v1/install/report`;
-  const { org, email } = result;
 
   if (os === "linux") {
     const script = buildLinuxScript({
